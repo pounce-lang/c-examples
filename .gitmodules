@@ -1,3 +1,6 @@
 [submodule "c-core"]
 	path = c-core
 	url = https://github.com/pounce-lang/c-core.git
+[submodule "examples/flicker-sensor/awulff-pico-playground"]
+	path = examples/flicker-sensor/awulff-pico-playground
+	url = https://github.com/AlexFWulff/awulff-pico-playground.git
