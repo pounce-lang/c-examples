@@ -12,6 +12,8 @@
 #include "pico/stdlib.h"
 #include "hardware/adc.h"
 #include "hardware/dma.h"
+#include "pico/multicore.h"
+
 #include "awulff-pico-playground/adc_fft/kiss_fftr.h"
 
 // set this to determine sample rate
@@ -38,7 +40,7 @@ float freqs[NSAMP];
 void setup();
 void sample(uint8_t *capture_buf);
 
-int main()
+void core_1_main()
 {
   uint8_t cap_buf[NSAMP];
   kiss_fft_scalar fft_in[NSAMP]; // kiss_fft_scalar is a float
@@ -48,7 +50,7 @@ int main()
   // setup ports and outputs
   setup();
 
-  while (1)
+  while (true)
   {
     // get NSAMP samples at FSAMP
     sample(cap_buf);
@@ -86,17 +88,30 @@ int main()
     float max_freq = freqs[max_idx];
     if (max_power > avg_power * 200)
     {
-      printf("significant frequency: %5.1f Hz\t%5.1f\n", max_freq, (max_power / avg_power));
+      multicore_fifo_push_blocking(max_freq);
+      // printf("significant frequency: %5.1f Hz\t%5.1f\n", max_freq, (max_power / avg_power));
     }
     else
     {
-      printf("\t\t\t\tno significant frequency\n");
+      // printf("\t\t\t\tno significant frequency\n");
     }
   }
 
   // should never get here
   kiss_fft_free(cfg);
 }
+
+int main() {
+    float sf;
+    stdio_init_all();
+
+    multicore_launch_core1(core_1_main);
+    while (true) {
+        sf = multicore_fifo_pop_blocking();
+        printf("sig freq %5.1f\n", sf);
+    }
+}
+
 
 void sample(uint8_t *capture_buf)
 {
