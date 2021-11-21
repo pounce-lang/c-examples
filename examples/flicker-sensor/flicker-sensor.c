@@ -1,6 +1,6 @@
 // Sample from the ADC continuously at a particular sample rate
-// compute an FFT over the data and scan the frequency domain data 
-// for significant power at some frequency. 
+// compute an FFT over the data and scan the frequency domain data
+// for significant power at some frequency.
 //
 // much of this code is from pico-examples/adc/dma_capture/dma_capture.c
 // the FFT processing written by Alex Wulff (www.AlexWulff.com)
@@ -68,7 +68,42 @@ void core_1_main()
 
     // compute fast fourier transform
     kiss_fftr(cfg, fft_in, fft_out);
+    multicore_fifo_push_blocking(-1);
+    multicore_fifo_push_blocking(-1);
+    multicore_fifo_push_blocking(-1);
+    for (int i = 0; i < NSAMP / 2; i++)
+    {
+      multicore_fifo_push_blocking(fft_out[i].r);
+      multicore_fifo_push_blocking(fft_out[i].i);
+    }
+  }
 
+  // should never get here
+  kiss_fft_free(cfg);
+}
+
+int main()
+{
+  kiss_fft_cpx fft_out[(NSAMP/2)];
+  stdio_init_all();
+
+  multicore_launch_core1(core_1_main);
+  while (true)
+  {
+    if (multicore_fifo_pop_blocking() != -1) {
+      printf("1 missmatch of fft_out");
+    }
+    if (multicore_fifo_pop_blocking() != -1) {
+      printf("2 missmatch of fft_out");
+    }
+    if (multicore_fifo_pop_blocking() != -1) {
+      printf("3 missmatch of fft_out");
+    }
+    for (int i = 0; i < NSAMP / 2; i++)
+    {
+      fft_out[i].r = multicore_fifo_pop_blocking();
+      fft_out[i].i = multicore_fifo_pop_blocking();
+    }
     // compute power and calculate max freq component
     float max_power = 0;
     float avg_power = 0;
@@ -88,30 +123,14 @@ void core_1_main()
     float max_freq = freqs[max_idx];
     if (max_power > avg_power * 200)
     {
-      multicore_fifo_push_blocking(max_freq);
-      // printf("significant frequency: %5.1f Hz\t%5.1f\n", max_freq, (max_power / avg_power));
+      printf("significant frequency: %5.1f Hz\t%5.1f\n", max_freq, (max_power / avg_power));
     }
     else
     {
-      // printf("\t\t\t\tno significant frequency\n");
+      printf("\t\t\t\tno significant frequency\n");
     }
   }
-
-  // should never get here
-  kiss_fft_free(cfg);
 }
-
-int main() {
-    float sf;
-    stdio_init_all();
-
-    multicore_launch_core1(core_1_main);
-    while (true) {
-        sf = multicore_fifo_pop_blocking();
-        printf("sig freq %5.1f\n", sf);
-    }
-}
-
 
 void sample(uint8_t *capture_buf)
 {
