@@ -13,68 +13,52 @@
 #include "hardware/adc.h"
 #include "hardware/dma.h"
 #include "pico/multicore.h"
+#include "pico/util/queue.h"
 
 #include "awulff-pico-playground/adc_fft/kiss_fftr.h"
 
 // based on a 48MHz ADC clock speed
-// and using successive-approximation (SA)
-// a minimum of 96 samples are taken, the fastest SA sampling is
+// and using successive-approximation (SA) 
+// a minimum of 96 samples are taken, the fastest SA sampling is  
 // set this to determine sample rate
 // | clock-div |=| sample-freq |Hz|
 // |   SA off  |=| 48,00,000   |Hz|
 // | 96        |=| 500,000     |Hz|
 // | 960       |=| 50,000      |Hz|
 // | 9600      |=| 5,000       |Hz|
-#define CLOCK_DIV 1920 // (960 * 2)
-#define FSAMP 25000 // (50000 / 2)
+#define CLOCK_DIV 960
+#define FSAMP 50000
 
 // Channel 0 is GPIO26
 #define CAPTURE_CHANNEL 0
 #define LED_PIN 25
 
-// BE CAREFUL: anything over about 9000(300) here will cause things
+// BE CAREFUL: anything over about 9000 here will cause things
 // to silently break. The code will compile and upload, but due
 // to memory issues nothing will work properly
-#define NSAMP 250
+#define NSAMP 5000
 
 // globals
 dma_channel_config cfg;
 uint dma_chan;
-
-kiss_fft_cpx transfer[(NSAMP / 2)];
-bool transfer_ready;
+float freqs[NSAMP];
+queue_t q;
 
 void setup();
 void sample(uint8_t *capture_buf);
 
-void core_1_setup(float *frequencies) {
-  // calculate frequencies of each bin
-  float f_max = FSAMP / 2;
-  float f_res = f_max / NSAMP;
-  for (int i = 0; i < NSAMP; i++)
-  {
-    frequencies[i] = f_res * i;
-  }
-}
-
 void core_1_main()
 {
-  kiss_fft_cpx fft_freq[(NSAMP / 2)];
-  float freqs[NSAMP];
-  core_1_setup(freqs);
-  while (1)
+  kiss_fft_cpx fft_freq[(NSAMP/2)];
+  kiss_fft_cpx temp;
+  while (true)
   {
-    // block until transfer is ready
-    while (!transfer_ready)
-    {
-      sleep_ms(1);
-    }
+    printf("from core-1: going to read from the queue");
     for (int i = 0; i < NSAMP / 2; i++)
     {
-      fft_freq[i] = transfer[i];
+      queue_remove_blocking(&q, &temp);
+      fft_freq[i] = temp;		
     }
-    transfer_ready = false;
-    gpio_put(LED_PIN, 0);
     // compute power and calculate max freq component
     float max_power = 0;
     float avg_power = 0;
@@ -92,7 +76,7 @@ void core_1_main()
     }
 
     float max_freq = freqs[max_idx];
-    if (max_power > avg_power * 100)
+    if (max_power > avg_power * 200)
     {
       printf("significant frequency: %6.1f Hz\t%6.0f\n", max_freq, (max_power / avg_power));
     }
@@ -106,20 +90,20 @@ void core_1_main()
 int main()
 {
   stdio_init_all();
-  sleep_ms(1000);
+  queue_init(&q, sizeof(kiss_fft_cpx), NSAMP);
+  printf("sizeof(kiss_fft_cpx) %d", sizeof(kiss_fft_cpx));
 
   uint8_t cap_buf[NSAMP];
   kiss_fft_scalar fft_in[NSAMP]; // kiss_fft_scalar is a float
   kiss_fft_cpx fft_out[NSAMP];
   kiss_fftr_cfg cfg = kiss_fftr_alloc(NSAMP, false, 0, 0);
-
+  
   // setup ports and outputs
   setup();
-  transfer_ready = false;
 
   multicore_launch_core1(core_1_main);
 
-  while (1)
+  while (true)
   {
     // get NSAMP samples at FSAMP
     sample(cap_buf);
@@ -137,19 +121,16 @@ int main()
 
     // compute fast fourier transform
     kiss_fftr(cfg, fft_in, fft_out);
-
-    // to transfer, first block while core1 is reading
-    while (transfer_ready)
-    {
-      sleep_ms(1);
-    }
-    // ok! now transfer_ready is false and that indicates that we can write
+    // send a sync of 3 (-1)s, then pipe out the fft_out
+    kiss_fft_cpx temp;
+    gpio_put(LED_PIN, 1);
     for (int i = 0; i < NSAMP / 2; i++)
     {
-      transfer[i] = fft_out[i];
+      temp = fft_out[i];
+      queue_add_blocking(&q, &temp);
     }
-    transfer_ready = true;
     gpio_put(LED_PIN, 1);
+
   }
 
   // should never get here
@@ -176,7 +157,7 @@ void sample(uint8_t *capture_buf)
 
 void setup()
 {
-  //  stdio_init_all();
+//  stdio_init_all();
 
   gpio_init(LED_PIN);
   gpio_set_dir(LED_PIN, GPIO_OUT);
@@ -209,4 +190,11 @@ void setup()
   // Pace transfers based on availability of ADC samples
   channel_config_set_dreq(&cfg, DREQ_ADC);
 
+  // calculate frequencies of each bin
+  float f_max = FSAMP / 2;
+  float f_res = f_max / NSAMP;
+  for (int i = 0; i < NSAMP; i++)
+  {
+    freqs[i] = f_res * i;
+  }
 }
