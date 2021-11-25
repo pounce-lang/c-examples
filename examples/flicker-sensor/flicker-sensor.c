@@ -24,9 +24,12 @@
 // |   SA off  |=| 48,00,000   |Hz|
 // | 96        |=| 500,000     |Hz|
 // | 960       |=| 50,000      |Hz|
+// | 1920      |=| 25,000      |Hz|
 // | 9600      |=| 5,000       |Hz|
-#define CLOCK_DIV 1920 // (960 * 2)
-#define FSAMP 25000 // (50000 / 2)
+// 1920 // (960 * 2)    or 19200 or 
+#define CLOCK_DIV 1920
+// 25000 // (50000 / 2) or 2500
+#define FSAMP     25000
 
 // Channel 0 is GPIO26
 #define CAPTURE_CHANNEL 0
@@ -36,12 +39,13 @@
 // to silently break. The code will compile and upload, but due
 // to memory issues nothing will work properly
 #define NSAMP 250
+#define NSAMP_2 (NSAMP / 2)
 
 // globals
 dma_channel_config cfg;
 uint dma_chan;
 
-kiss_fft_cpx transfer[(NSAMP / 2)];
+kiss_fft_cpx transfer[NSAMP_2];
 bool transfer_ready;
 
 void setup();
@@ -51,7 +55,7 @@ void core_1_setup(float *frequencies) {
   // calculate frequencies of each bin
   float f_max = FSAMP / 2;
   float f_res = f_max / NSAMP;
-  for (int i = 0; i < NSAMP; i++)
+  for (int i = 0; i < NSAMP_2; i++)
   {
     frequencies[i] = f_res * i;
   }
@@ -59,8 +63,8 @@ void core_1_setup(float *frequencies) {
 
 void core_1_main()
 {
-  kiss_fft_cpx fft_freq[(NSAMP / 2)];
-  float freqs[NSAMP];
+  kiss_fft_cpx fft_freq[NSAMP_2];
+  float freqs[NSAMP_2];
   core_1_setup(freqs);
   while (1)
   {
@@ -69,7 +73,7 @@ void core_1_main()
     {
       sleep_ms(1);
     }
-    for (int i = 0; i < NSAMP / 2; i++)
+    for (int i = 0; i < NSAMP_2; i++)
     {
       fft_freq[i] = transfer[i];
     }
@@ -80,7 +84,7 @@ void core_1_main()
     float avg_power = 0;
     int max_idx = 0;
     // any frequency bin over NSAMP/2 is aliased (nyquist sampling theorum)
-    for (int i = 0; i < NSAMP / 2; i++)
+    for (int i = 0; i < NSAMP_2; i++)
     {
       float power = fft_freq[i].r * fft_freq[i].r + fft_freq[i].i * fft_freq[i].i;
       if (power > max_power)
@@ -144,7 +148,7 @@ int main()
       sleep_ms(1);
     }
     // ok! now transfer_ready is false and that indicates that we can write
-    for (int i = 0; i < NSAMP / 2; i++)
+    for (int i = 0; i < NSAMP_2; i++)
     {
       transfer[i] = fft_out[i];
     }
